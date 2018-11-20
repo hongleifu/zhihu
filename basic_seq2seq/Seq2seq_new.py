@@ -20,7 +20,6 @@ from distutils.version import LooseVersion
 import tensorflow as tf
 from tensorflow.python.layers.core import Dense
 
-
 # Check TensorFlow Version
 assert LooseVersion(tf.__version__) >= LooseVersion('1.8'), 'Please use TensorFlow version 1.8 or newer'
 print('TensorFlow Version: {}'.format(tf.__version__))
@@ -30,54 +29,181 @@ import time
 import tensorflow as tf
 import jieba
 
-# # 数据加载
-def load_data(source_file,target_file,encoding='utf-8'):
-    """load data from source_file and target_file.
+class DialogTrain:
+    def __init__(self,checkpoint = "./dialog_model.ckpt",source_file,target_file,\
+                special_word_to_int,special_int_to_word,special_embeddings,\
+                general_word_to_int,general_int_to_word,\
+                word_to_vector,\
+                encoder_rnn_size,encoder_num_layers,decoder_rnn_size,decoder_num_layers,\
+                epochs,batch_size,learn_rate):
+        self.checkpoint=checkpoint
+        self.source_file=source_file
+        self.target_file=target_file
+        self.target_file=target_file
+        self.special_word_to_int=special_word_to_int
+        self.special_int_to_word=special_int_to_word
+        self.special_embeddings=special_embeddings
+        self.general_word_to_int=general_word_to_int
+        self.general_int_to_word=general_int_to_word
+        self.word_to_vector=word_to_vector
+        self.encoder_rnn_size=encoder_rnn_size
+        self.encoder_num_layers=encoder_num_layers
+        self.decoder_rnn_size=decoder_rnn_size
+        self.decoder_num_layers=decoder_num_layers
+        self.batch_size=batch_size
+        self.epochs=epochs
+        self.learn_rate=learn_rate
 
-    - `source_file`:file name save ask sentences,format like: 
-       你好
-       今天天气怎么样
-       ....
-    - `target_file`:file name save answer sentences,format like: 
-       你也好
-       今天天气不错
-       ....
-    - `encoding`:encode of source_file and target_file,default utf8 
-    -  return: list of source sentences and target sentences. like:
-       (['你好','今天天气怎么样'...],['你也好','今天天气不错'...])
-    """
-    with open(source_file, 'r', encoding=encoding) as f:
-        source_data = f.read().split('\n')
-    with open(target_file, 'r', encoding=encoding) as f:
-        target_data = f.read().split('\n')
-    return source_data,target_data
+    def train(self):
+        #读取问和答数据，转成向量格式
+        source_data,target_data=load_data(self.source_file,self.target_file) 
+        target_word_to_int,target_int_to_word=extract_word_vocab(word_seg_sentences(target_data))
 
-def word_seg_sentence(sentence):
-    return list(jieba.cut(sentence.strip(),cut_all=False))
+        source_pad_int=self.special_word_to_int['<PAD>']
+        target_pad_int=target_word_to_int['<PAD>']
+        
+        source_int = source_sentences_to_int(source_data,self.special_word_to_int,self.general_word_to_int) 
+        target_int = target_sentences_to_int(target_data,target_word_to_int) 
     
-def word_seg_sentences(data):
-    result=[]
-    for sentence in data:
-        result.append(word_seg_sentence(sentence))
+        # 将数据集分割为train和validation
+        train_source = source_int[self.batch_size:]
+        train_target = target_int[self.batch_size:]
+    
+        # 留出一个batch进行验证
+        valid_source = source_int[:self.batch_size]
+        valid_target = target_int[:self.batch_size]
+        (valid_targets_batch, valid_sources_batch, valid_targets_lengths, valid_sources_lengths) = \
+            next(get_batches(valid_target, valid_source, batch_size,source_pad_int,target_pad_int))
+        
+        display_step = 50 # 每隔50轮输出loss
+    
+        train_graph,train_op,cost=create_graph(source_int_to_word,target_int_to_word,\
+                     special_word_to_int,special_embeddings,rnn_size, num_layers):
+    
+        with tf.Session(graph=train_graph) as sess:
+            sess.run(tf.global_variables_initializer())
+                
+            for epoch_i in range(1, epochs+1):
+                for batch_i, (targets_batch, sources_batch, targets_lengths, sources_lengths) in enumerate(
+                        get_batches(train_target, train_source, batch_size,source_pad_int,target_pad_vector)):
+                    
+                    _, loss = sess.run(
+                        [train_op, cost],
+                        {input_data: sources_batch,
+                         targets: targets_batch,
+                         lr: learning_rate,
+                         target_sequence_length: targets_lengths,
+                         source_sequence_length: sources_lengths})
+        
+                    if batch_i % display_step == 0:
+                        # 计算validation loss
+                        validation_loss = sess.run(
+                        [cost],
+                        {input_data: valid_sources_batch,
+                         targets: valid_targets_batch,
+                         lr: learning_rate,
+                         target_sequence_length: valid_targets_lengths,
+                         source_sequence_length: valid_sources_lengths})
+                        
+                        print('Epoch {:>3}/{} Batch {:>4}/{} - Training Loss: {:>6.3f}  - Validation loss: {:>6.3f}'
+                              .format(epoch_i,
+                                      epochs, 
+                                      batch_i, 
+                                      len(train_source) // batch_size, 
+                                      loss, 
+                                      validation_loss[0]))
+            
+            # 保存模型
+            saver = tf.train.Saver()
+            print('Model begin save')
+            saver.save(sess, checkpoint)
+            print('Model Trained and Saved')
 
-# # 生成词典
-def extract_word_vocab(data):
-    '''
-    构造映射表
-    - `data`:list of list of word,format like:
-       [['今天','天气','怎么样'],...]
 
-    return: int_to_word and word_to_int.format like:
-       ({5:'你好'...},{'天气':10})
-    '''
-    special_words = ['<PAD>', '<UNK>', '<GO>',  '<EOS>']
+    def get_batches(targets, sources, batch_size, source_pad_int, target_pad_int):
+        '''
+        定义生成器，用来获取batch
+        参数：
+        - targets: int of targets.like:
+              [[1,2,3],
+               [5,4,5],
+               ...,
+              ]
+        - sources: int of sources.like:
+              [[1,5,3],
+               [2,2,7],
+               ...,
+              ]
+        - source_pad_vector: <PAD>对应的int
+        - target_pad_vector: <PAD>对应的int
+        '''
+        for batch_i in range(0, len(sources)//batch_size):
+            start_i = batch_i * batch_size
+            sources_batch = sources[start_i:start_i + batch_size]
+            targets_batch = targets[start_i:start_i + batch_size]
+            # 补全序列
+            pad_sources_batch = np.array(pad_sentence_batch(sources_batch, source_pad_int))
+            pad_targets_batch = np.array(pad_sentence_batch(targets_batch, target_pad_int))
+            
+            # 记录每条记录的长度
+            targets_lengths = []
+            for target in targets_batch:
+                targets_lengths.append(len(target))
+            
+            source_lengths = []
+            for source in sources_batch:
+                source_lengths.append(len(source))
+            
+            yield pad_targets_batch, pad_sources_batch, targets_lengths, source_lengths
+    # # 数据加载
+    def load_data(self,source_file,target_file,encoding='utf-8'):
+        """load data from source_file and target_file.
+    
+        - `source_file`:file name save ask sentences,format like: 
+           你好
+           今天天气怎么样
+           ....
+        - `target_file`:file name save answer sentences,format like: 
+           你也好
+           今天天气不错
+           ....
+        - `encoding`:encode of source_file and target_file,default utf8 
+        -  return: list of source sentences and target sentences. like:
+           (['你好','今天天气怎么样'...],['你也好','今天天气不错'...])
+        """
+        with open(source_file, 'r', encoding=encoding) as f:
+            source_data = f.read().split('\n')
+        with open(target_file, 'r', encoding=encoding) as f:
+            target_data = f.read().split('\n')
+        return source_data,target_data
 
-    set_words = list(set([word for line in data for word in line]))
-    # 这里要把四个特殊字符添加进词典
-    int_to_vocab = {idx: word for idx, word in enumerate(special_words + set_words)}
-    vocab_to_int = {word: idx for idx, word in int_to_vocab.items()}
+    # # 生成词典
+    def extract_word_vocab(self,data):
+        '''
+        构造映射表
+        - `data`:list of list of word,format like:
+           [['今天','天气','怎么样'],...]
+    
+        return: int_to_word and word_to_int.format like:
+           ({5:'你好'...},{'天气':10})
+        '''
+        special_words = ['<PAD>', '<UNK>', '<GO>',  '<EOS>']
+    
+        set_words = list(set([word for line in data for word in line]))
+        # 这里要把四个特殊字符添加进词典
+        int_to_vocab = {idx: word for idx, word in enumerate(special_words + set_words)}
+        vocab_to_int = {word: idx for idx, word in int_to_vocab.items()}
+    
+        return int_to_vocab, vocab_to_int
 
-    return int_to_vocab, vocab_to_int
+    def word_seg_sentence(self,sentence):
+        return list(jieba.cut(sentence.strip(),cut_all=False))
+        
+    def word_seg_sentences(self,data):
+        result=[]
+        for sentence in data:
+            result.append(word_seg_sentence(sentence))
+
 
 def target_sentence_to_int(sentence,word_to_int):
     return [word_to_int.get(word, word_to_int['<UNK>']) for word in word_seg_sentence(sentence)]
@@ -472,41 +598,6 @@ def pad_sentence_batch(sentence_batch, pad_int):
 # In[17]:
 
 
-def get_batches(targets, sources, batch_size, source_pad_int, target_pad_int):
-    '''
-    定义生成器，用来获取batch
-    参数：
-    - targets: int of targets.like:
-          [[1,2,3],
-           [5,4,5],
-           ...,
-          ]
-    - sources: int of sources.like:
-          [[1,5,3],
-           [2,2,7],
-           ...,
-          ]
-    - source_pad_vector: <PAD>对应的int
-    - target_pad_vector: <PAD>对应的int
-    '''
-    for batch_i in range(0, len(sources)//batch_size):
-        start_i = batch_i * batch_size
-        sources_batch = sources[start_i:start_i + batch_size]
-        targets_batch = targets[start_i:start_i + batch_size]
-        # 补全序列
-        pad_sources_batch = np.array(pad_sentence_batch(sources_batch, source_pad_int))
-        pad_targets_batch = np.array(pad_sentence_batch(targets_batch, target_pad_int))
-        
-        # 记录每条记录的长度
-        targets_lengths = []
-        for target in targets_batch:
-            targets_lengths.append(len(target))
-        
-        source_lengths = []
-        for source in sources_batch:
-            source_lengths.append(len(source))
-        
-        yield pad_targets_batch, pad_sources_batch, targets_lengths, source_lengths
 
 
 # ## Train
@@ -531,77 +622,6 @@ def sentences_to_vector(sentences):
         result.append(sentence_to_vector(sentence))
     return result
 
-def train(source_file,target_file,checkpoint = "./my_model.ckpt",batch_size=128,\
-    epochs,rnn_size, num_layers,\
-    special_word_to_int,special_embeddings,\
-    learning_rate=0.001)
-    #读取问和答数据，转成向量格式
-    source_data,target_data=load_data(source_file,target_file) 
-    source_word_to_int,source_int_to_word=extract_word_vocab(word_seg_sentences(source_data))
-    target_word_to_int,target_int_to_word=extract_word_vocab(word_seg_sentences(target_data))
-    #source_vector=data_to_vector(source_data)
-    #source_vector=data_to_vector(target_data)
-    source_pad_int=source_word_to_int['<PAD>']
-    target_pad_int=target_word_to_int['<PAD>']
-    
-    source_int = data_to_int(data,source_word_to_int) 
-    target_int = data_to_int(data,special_word_to_int) 
-
-    # 将数据集分割为train和validation
-    train_source = source_int[batch_size:]
-    train_target = target_int[batch_size:]
-
-    # 留出一个batch进行验证
-    valid_source = source_int[:batch_size]
-    valid_target = target_int[:batch_size]
-    (valid_targets_batch, valid_sources_batch, valid_targets_lengths, valid_sources_lengths) = \
-        next(get_batches(valid_target, valid_source, batch_size,source_pad_int,target_pad_int))
-    
-    display_step = 50 # 每隔50轮输出loss
-
-    train_graph,train_op,cost=create_graph(source_int_to_word,target_int_to_word,\
-                 special_word_to_int,special_embeddings,rnn_size, num_layers):
-
-    with tf.Session(graph=train_graph) as sess:
-        sess.run(tf.global_variables_initializer())
-            
-        for epoch_i in range(1, epochs+1):
-            for batch_i, (targets_batch, sources_batch, targets_lengths, sources_lengths) in enumerate(
-                    get_batches(train_target, train_source, batch_size,source_pad_int,target_pad_vector)):
-                
-                _, loss = sess.run(
-                    [train_op, cost],
-                    {input_data: sources_batch,
-                     targets: targets_batch,
-                     lr: learning_rate,
-                     target_sequence_length: targets_lengths,
-                     source_sequence_length: sources_lengths})
-    
-                if batch_i % display_step == 0:
-                    # 计算validation loss
-                    validation_loss = sess.run(
-                    [cost],
-                    {input_data: valid_sources_batch,
-                     targets: valid_targets_batch,
-                     lr: learning_rate,
-                     target_sequence_length: valid_targets_lengths,
-                     source_sequence_length: valid_sources_lengths})
-                    
-                    print('Epoch {:>3}/{} Batch {:>4}/{} - Training Loss: {:>6.3f}  - Validation loss: {:>6.3f}'
-                          .format(epoch_i,
-                                  epochs, 
-                                  batch_i, 
-                                  len(train_source) // batch_size, 
-                                  loss, 
-                                  validation_loss[0]))
-    
-        
-        
-        # 保存模型
-        saver = tf.train.Saver()
-        print('Model begin save')
-        saver.save(sess, checkpoint)
-        print('Model Trained and Saved')
 
 
 # ## 预测
