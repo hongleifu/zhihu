@@ -79,22 +79,62 @@ def extract_word_vocab(data):
 
     return int_to_vocab, vocab_to_int
 
-def sentence_to_int(sentence,word_to_int):
+def target_sentence_to_int(sentence,word_to_int):
     return [word_to_int.get(word, word_to_int['<UNK>']) for word in word_seg_sentence(sentence)]
 
-def sentences_to_int(sentences,word_to_int):
+def target_sentences_to_int(sentences,word_to_int):
     return [sentence_to_int(sentence) for sentence in sentences]
 
-def data_to_int(data,word_to_int)
-    '''
-    - `data`:list of list of word,format like:
-       [['今天','天气','怎么样'],...]
+def source_sentence_to_int(sentence,special_word_to_int,general_word_to_int):
+    word_list=word_seg_sentence(sentence)
+    result=[]
+    for word in word_list:
+        if word in special_word_to_int:
+            result.append(special_word_to_int.get(word)
+        elif word in general_word_to_int:
+            result.append(general_word_to_int.get(word)
+        else:
+            result.append(special_word_to_int.get('<UNK>')
+    return result
 
-    return: list of list of int,format like:
-       [[6,10,12],...]
-    '''
-    return [[word_to_int.get(word, word_to_int['<UNK>']) 
-               for word in line] for line in data]
+def source_sentences_to_int(sentences,special_word_to_int,general_word_to_int):
+    return [source_sentence_to_int(sentence,special_word_to_int,general_word_to_int) for sentence in sentences]
+
+#def source_data_to_int(source_data,special_word_to_int,general_word_to_int)
+#    '''
+#    - `source_data`:list of list of word,format like:
+#       [['今天','天气','怎么样'],...]
+#
+#    return: list of list of int,format like:
+#       [[6,10,12],...]
+#    '''
+#    result=[]
+#    for word in source_data:
+#        if word in special_word_to_int:
+#            result.append(special_word_to_int.get(word)
+#        elif word in general_word_to_int:
+#            result.append(general_word_to_int.get(word)
+#        else:
+#            result.append(special_word_to_int.get('<UNK>')
+#    return result
+#
+#def source_data_to_int(source_data,special_word_to_int,general_word_to_int)
+#    '''
+#    - `source_data`:list of list of word,format like:
+#       [['今天','天气','怎么样'],...]
+#
+#    return: list of list of int,format like:
+#       [[6,10,12],...]
+#    '''
+#    result=[]
+#    for word in source_data:
+#        if word in special_word_to_int:
+#            result.append(special_word_to_int.get(word)
+#        elif word in general_word_to_int:
+#            result.append(general_word_to_int.get(word)
+#        else:
+#            result.append(special_word_to_int.get('<UNK>')
+#    return result
 
 # 构造映射表
 #source_int_to_word, source_word_to_int = extract_word_vocab(source_data)
@@ -122,7 +162,45 @@ def get_inputs():
     return inputs, targets, learning_rate, target_sequence_length, max_target_sequence_length, source_sequence_length
 
 # convert int input to embed input
-def int_input_to_embed_input(int_input,int_to_word):
+def source_int_input_to_embed_input(int_input,special_int_to_word,general_int_to_word):
+    '''
+    参数说明：
+    - int_input: one sentence,a list of 输入单词id的列表,format like:
+        [1,15,3,4]
+    - int_to_word: 字典映射of id:word
+    返回值: 
+    - embed_input,one sentence,a list of vector,formate like:
+        [[1.0,2.1,3.5],[2.2,5.9,1.3],[2.2,3.2,2.1],[1.5,6.3.8.0]]
+    '''
+    embed_input=[]
+    for item in int_input:
+        word='<UNK>'
+        if item in special_int_to_word:
+            word=special_int_to_word.get(item)
+        elif item in general_int_to_word:
+            word=general_int_to_word.get(item)
+        else:
+            word='<UNK>'
+        embed_input.append(word_to_vector(word))
+    return embed_input
+
+def source_int_inputs_to_embed_inputs(int_inputs,special_int_to_word,general_int_to_word):
+    '''
+    参数说明：
+    - int_inputs: sentences.list of list of 输入单词id的列表,format like:
+        [[1,15,3,4],[2,6,7,8]]
+    - int_to_word: 字典映射of id:word
+    返回值: 
+    - embed_inputs:sentences,list of list of vector,formate like:
+        [[[1.0,2.1,3.5],[2.2,5.9,1.3],[2.2,3.2,2.1],[1.5,6.3.8.0]],[[1.0,2.1,3.5],[2.2,5.9,1.3],[2.2,3.2,2.1],[1.5,6.3.8.0]]]
+    '''
+    embed_inputs=[]
+    for item in int_inputs:
+        embed_inputs.append(source_int_input_to_embed_input(item,special_int_to_word,general_int_to_word))
+    return embed_inputs
+
+# convert int input to embed input
+def target_int_input_to_embed_input(int_input,int_to_word):
     '''
     参数说明：
     - int_input: one sentence,a list of 输入单词id的列表,format like:
@@ -137,7 +215,7 @@ def int_input_to_embed_input(int_input,int_to_word):
         embed_input.append(word_to_vector(int_to_word[item]))
     return embed_input
 
-def int_inputs_to_embed_inputs(int_inputs,int_to_word):
+def targets_int_inputs_to_embed_inputs(int_inputs,int_to_word):
     '''
     参数说明：
     - int_inputs: sentences.list of list of 输入单词id的列表,format like:
