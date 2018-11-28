@@ -19,6 +19,7 @@
 from distutils.version import LooseVersion
 import tensorflow as tf
 from tensorflow.python.layers.core import Dense
+import json
 
 # Check TensorFlow Version
 assert LooseVersion(tf.__version__) >= LooseVersion('1.8'), 'Please use TensorFlow version 1.8 or newer'
@@ -33,7 +34,7 @@ class DialogTrain:
     def __init__(self,checkpoint,source_file,target_file,\
                 encoder_rnn_size,encoder_num_layers,decoder_rnn_size,decoder_num_layers,\
                 epochs,batch_size,learn_rate,\
-                word_to_vector,special_embeddings
+                word_to_vector,special_embeddings,general_embeddings
                 ):
         self.checkpoint=checkpoint
         self.source_file=source_file
@@ -46,6 +47,7 @@ class DialogTrain:
         self.epochs=epochs
         self.learn_rate=learn_rate
         self.special_embeddings=special_embeddings
+        self.general_embeddings=general_embeddings
         self.word_to_vector=word_to_vector
         self.target_word_to_int={}
         self.target_int_to_word={}
@@ -71,7 +73,7 @@ class DialogTrain:
         print('target pad int...')
         print(target_pad_int)
         
-        source_int = self.source_sentences_to_int(source_data,self.word_to_vector) 
+        source_int = self.sentences_to_int(source_data,self.word_to_vector) 
         target_int = self.target_sentences_to_int(target_data,self.target_word_to_int) 
         print('source  int...')
         print(source_int)
@@ -94,8 +96,10 @@ class DialogTrain:
         print('valid_target...')
         print(valid_target)
 
-        (valid_targets_batch, valid_sources_batch, valid_targets_lengths, valid_sources_lengths) = \
-            next(self.get_batches(valid_target, valid_source, self.batch_size,source_pad_int,target_pad_int))
+        (valid_targets_batch,valid_targets_limit_index_batch, valid_sources_batch,\
+         valid_targets_lengths,valid_targets_limit_index_lengths, valid_sources_lengths) = \
+            next(self.get_batches(valid_target, valid_source,valid_target_limit_index,\
+            self.batch_size,source_pad_int,target_pad_int,target_pad_limit_index_int))
         print(valid_targets_batch, valid_sources_batch, valid_targets_lengths, valid_sources_lengths)
 
     def train(self):
@@ -104,20 +108,24 @@ class DialogTrain:
         self.target_int_to_word,self.target_word_to_int=self.extract_word_vocab(self.word_seg_sentences(target_data))
 
         source_pad_int=self.word_to_vector.get_int_by_word('<PAD>')
-        target_pad_int=self.target_word_to_int['<PAD>']
+        target_pad_int=self.word_to_vector.get_int_by_word('<PAD>')
+        target_pad_limit_index_int=self.target_word_to_int['<PAD>']
         
-        source_int = self.source_sentences_to_int(source_data,self.word_to_vector) 
-        target_int = self.target_sentences_to_int(target_data,self.target_word_to_int) 
+        source_int = self.sentences_to_int(source_data,self.word_to_vector) 
+        target_int = self.sentences_to_int(target_data,self.word_to_vector) 
+        target_limit_index_int = self.target_limit_index_sentences_to_int(target_data,self.target_word_to_int) 
 
         # 将数据集分割为train和validation
         train_source = source_int[self.batch_size:]
         train_target = target_int[self.batch_size:]
+        train_target_limit_index = target_limit_index_int[self.batch_size:]
     
         # 留出一个batch进行验证
         valid_source = source_int[:self.batch_size]
         valid_target = target_int[:self.batch_size]
-        (valid_targets_batch, valid_sources_batch, valid_targets_lengths, valid_sources_lengths) = \
-            next(self.get_batches(valid_target, valid_source, self.batch_size,source_pad_int,target_pad_int))
+        valid_target_limit_index = target_limit_index_int[self.batch_size:]
+        (valid_targets_batch,valid_targets_limit_index_batch, valid_sources_batch, valid_targets_lengths,valid_targets_limit_index_lengths, valid_sources_lengths) = \
+            next(self.get_batches(valid_target,valid_target_limit_index, valid_source, self.batch_size,source_pad_int,target_pad_int,target_pad_limit_index_int))
         
         display_step = 50 # 每隔50轮输出loss
     
@@ -126,15 +134,17 @@ class DialogTrain:
         train_graph = tf.Graph()
         with train_graph.as_default():
             # 获得模型输入    
-            sources, targets, learn_rate, target_sequence_length, max_target_sequence_length, source_sequence_length = self.get_inputs()
+            targets,targets_limit_index,sources,\
+            target_sequence_length,targets_limit_index_sequence_length, max_target_sequence_length, source_sequence_length,learn_rate = self.get_inputs()
             print('create seq2seq model...')
             training_decoder_output, predicting_decoder_output = self.seq2seq_model(\
                       sources,self.word_to_vector,source_sequence_length,\
                       targets,self.target_int_to_word,self.target_word_to_int,target_sequence_length,\
+                      targets_limit_index,targets_limit_index_sequence_length,
                       max_target_sequence_length,\
                       self.encoder_rnn_size, self.encoder_num_layers,\
                       self.decoder_rnn_size, self.decoder_num_layers,\
-                      self.special_embeddings)
+                      self.special_embeddings,self.general_embeddings)
             
             training_logits = tf.identity(training_decoder_output.rnn_output, 'logits')
             predicting_logits = tf.identity(predicting_decoder_output.sample_id, name='predictions')
@@ -146,7 +156,7 @@ class DialogTrain:
                 # Loss function
                 cost = tf.contrib.seq2seq.sequence_loss(
                     training_logits,
-                    targets,
+                    targets_limit_index,
                     masks)
                 # Optimizer
                 optimizer = tf.train.AdamOptimizer(learn_rate)
@@ -159,41 +169,62 @@ class DialogTrain:
         with tf.Session(graph=train_graph) as sess:
             sess.run(tf.global_variables_initializer())
             for epoch_i in range(1, self.epochs+1):
-                for batch_i, (targets_batch, sources_batch, targets_lengths, sources_lengths) in enumerate(
-                        self.get_batches(train_target, train_source, self.batch_size,source_pad_int,target_pad_int)):
+                for batch_i, (targets_batch,targets_limit_index_batch, sources_batch, targets_lengths,targets_limit_index_lengths, sources_lengths) in enumerate(
+                        self.get_batches(train_target,train_target_limit_index, train_source, self.batch_size,source_pad_int,target_pad_int,target_pad_limit_index_int)):
                     
+                   # print('targets_batch',targets_batch)
+                   # print('targets_limit_index_batch',targets_limit_index_batch)
+                   # print('sources_batch',sources_batch)
+                   # print('targets_lengths',targets_lengths)
+                   # print('sources_lengths',sources_lengths)
+                   # print('targets_limit_index_lengths',targets_limit_index_lengths)
                     _, loss = sess.run(
                         [train_op, cost],
-                        {sources: sources_batch,
+                        {
                          targets: targets_batch,
-                         targets_limit_index:targets_limit_index,
+                         targets_limit_index:targets_limit_index_batch,
+                         sources: sources_batch,
                          learn_rate: self.learn_rate,
                          target_sequence_length: targets_lengths,
-                         source_sequence_length: sources_lengths})
+                         source_sequence_length: sources_lengths,
+                         targets_limit_index_sequence_length:targets_limit_index_lengths})
         
                     if batch_i % display_step == 0:
                         # 计算validation loss
                         validation_loss = sess.run(
                         [cost],
-                        {input_data: valid_sources_batch,
+                        {
                          targets: valid_targets_batch,
-                         lr: self.learning_rate,
+                         targets_limit_index:valid_targets_limit_index_batch,
+                         sources: valid_sources_batch,
+                         learn_rate: self.learn_rate,
                          target_sequence_length: valid_targets_lengths,
-                         source_sequence_length: valid_sources_lengths})
+                         source_sequence_length: valid_sources_lengths,
+                         targets_limit_index_sequence_length:valid_targets_limit_index_lengths})
                         
                         print('Epoch {:>3}/{} Batch {:>4}/{} - Training Loss: {:>6.3f}  - Validation loss: {:>6.3f}'
                               .format(epoch_i,
-                                      epochs, 
+                                      self.epochs, 
                                       batch_i, 
-                                      len(train_source) // batch_size, 
+                                      len(train_source) // self.batch_size, 
                                       loss, 
                                       validation_loss[0]))
             
             # 保存模型
             saver = tf.train.Saver()
             print('Model begin save')
-            saver.save(sess, checkpoint)
+            saver.save(sess, self.checkpoint)
             print('Model Trained and Saved')
+            
+            #保存 target_word_to_int and target_int_to_word 
+            print('save target_int_to_word to file ./target_int_to_word.json')
+            with open('./target_int_to_word.json','w') as f:
+                json.dump(self.target_int_to_word,f)
+                print(self.target_int_to_word)
+            print('save target_word_to_int to file ./target_word_to_int.json')
+            with open('./target_word_to_int.json','w') as f2:
+                json.dump(self.target_word_to_int,f2)
+            return  self.target_int_to_word,self.target_word_to_int
 
 
     def pad_sentence_batch(self,sentence_batch, pad_int):
@@ -204,11 +235,11 @@ class DialogTrain:
         - sentence batch
         - pad_int: <PAD>对应索引号
         '''
-        max_sentence = max([len(sentence) for sentence in sentence_batch])
+        max_sentence = max([len(sentence) for sentence in sentence_batch])+1
         return [sentence + [pad_int] * (max_sentence - len(sentence)) for sentence in sentence_batch]
 
     # ## Batches
-    def get_batches(self,targets, sources, batch_size, source_pad_int, target_pad_int):
+    def get_batches(self,targets,targets_limit_index,sources, batch_size, source_pad_int, target_pad_int,target_pad_limit_index_int):
         '''
         定义生成器，用来获取batch大小的数据
         参数：
@@ -229,22 +260,28 @@ class DialogTrain:
             start_i = batch_i * batch_size
             sources_batch = sources[start_i:start_i + batch_size]
             targets_batch = targets[start_i:start_i + batch_size]
+            targets_limit_index_batch = targets_limit_index[start_i:start_i + batch_size]
             # 补全序列
             #pad_sources_batch = np.array(self.pad_sentence_batch(sources_batch, source_pad_int))
             #pad_targets_batch = np.array(self.pad_sentence_batch(targets_batch, target_pad_int))
             pad_sources_batch = self.pad_sentence_batch(sources_batch, source_pad_int)
             pad_targets_batch = self.pad_sentence_batch(targets_batch, target_pad_int)
+            pad_targets_limit_index_batch = self.pad_sentence_batch(targets_limit_index_batch, target_pad_limit_index_int)
             
             # 记录每条记录的长度
             targets_lengths = []
             for target in targets_batch:
-                targets_lengths.append(len(target))
+                targets_lengths.append(len(target)+1)
+
+            targets_limit_index_lengths = targets_lengths
+            #for item in targets_limit_index_batch:
+            #    targets_limit_index_lengths.append(len(target))
             
             source_lengths = []
             for source in sources_batch:
                 source_lengths.append(len(source))
             
-            yield pad_targets_batch, pad_sources_batch, targets_lengths, source_lengths
+            yield pad_targets_batch,pad_targets_limit_index_batch,pad_sources_batch, targets_lengths,targets_limit_index_lengths, source_lengths
 
     # # 数据加载
     def load_data(self,source_file,target_file,encoding='utf-8'):
@@ -282,7 +319,7 @@ class DialogTrain:
     
         set_words = list(set([word for line in data for word in line]))
         # 这里要把四个特殊字符添加进词典
-        int_to_vocab = {idx: word for idx, word in enumerate(special_words + set_words)}
+        int_to_vocab = {int(idx): word for idx, word in enumerate(special_words + set_words)}
         vocab_to_int = {word: idx for idx, word in int_to_vocab.items()}
     
         return int_to_vocab, vocab_to_int
@@ -300,10 +337,11 @@ class DialogTrain:
     # In[13]:
     def seq2seq_model(self,encoder_input,word_to_vector,source_sequence_length,\
                       decoder_input,target_int_to_word,target_word_to_int,target_sequence_length,\
+                      decoder_limit_index,targets_limit_index_sequence_length,
                       max_target_sequence_length,\
                       encoder_rnn_size, encoder_num_layers,\
                       decoder_rnn_size, decoder_num_layers,\
-                      special_embeddings):
+                      special_embeddings,general_embeddings):
         
         # 获取encoder的状态输出
         encoder_output, encoder_state = self.get_encoder_result(encoder_input,\
@@ -355,7 +393,7 @@ class DialogTrain:
         print('type special embedding[0]')
         print(type(self.special_embeddings[0]))
         #encoder_embeddings = tf.Variable(self.special_embeddings)
-        encoder_embeddings = tf.constant(self.special_embeddings)
+        encoder_embeddings = tf.constant(self.general_embeddings)
         encoder_embed_input = tf.nn.embedding_lookup(encoder_embeddings,encoder_input)
         print(encoder_input)
         print(type(encoder_embed_input))
@@ -404,10 +442,10 @@ class DialogTrain:
         # 1. Embedding
         target_vocab_size = len(target_int_to_word)
 
-        decoder_train_embeddings = tf.constant(self.special_embeddings)
+        decoder_train_embeddings = tf.constant(self.general_embeddings)
         decoder_train_embed_input = tf.nn.embedding_lookup(decoder_train_embeddings,decoder_input)
 
-        decoder_predict_embeddings = tf.constant(self.special_embeddings)
+        decoder_predict_embeddings = tf.constant(self.general_embeddings)
         #decoder_predict_embeddings =tf.Variable(tf.random_uniform([target_vocab_size, 100])) 
         decoder_predict_embed_input = tf.nn.embedding_lookup(decoder_predict_embeddings,decoder_input)
     
@@ -486,7 +524,7 @@ class DialogTrain:
                       max_target_sequence_length,\
                       self.encoder_rnn_size, self.encoder_num_layers,\
                       self.decoder_rnn_size, self.decoder_num_layers,\
-                      self.special_embeddings)
+                      self.special_embeddings,self.general_embeddings)
             
             training_logits = tf.identity(training_decoder_output.rnn_output, 'logits')
             predicting_logits = tf.identity(predicting_decoder_output.sample_id, name='predictions')
@@ -507,17 +545,17 @@ class DialogTrain:
                 train_op = optimizer.apply_gradients(capped_gradients)
         return train_graph,train_op,cost
 
-    def source_sentence_to_int(self,sentence,word_to_vector):
+    def sentence_to_int(self,sentence,word_to_vector):
         return [word_to_vector.get_int_by_word(word) for word in self.word_seg_sentence(sentence)]
     
-    def source_sentences_to_int(self,sentences,word_to_vector):
-        return [self.source_sentence_to_int(sentence,word_to_vector) for sentence in sentences]
+    def sentences_to_int(self,sentences,word_to_vector):
+        return [self.sentence_to_int(sentence,word_to_vector) for sentence in sentences]
 
-    def target_sentence_to_int(self,sentence,target_word_to_int):
+    def target_limit_index_sentence_to_int(self,sentence,target_word_to_int):
         return [target_word_to_int.get(word, target_word_to_int['<UNK>']) for word in self.word_seg_sentence(sentence)]
     
-    def target_sentences_to_int(self,sentences,target_word_to_int):
-        return [self.target_sentence_to_int(sentence,target_word_to_int) for sentence in sentences]
+    def target_limit_index_sentences_to_int(self,sentences,target_word_to_int):
+        return [self.target_limit_index_sentence_to_int(sentence,target_word_to_int) for sentence in sentences]
 
     def get_inputs(self):
         '''
@@ -530,10 +568,12 @@ class DialogTrain:
         
         # 定义target序列最大长度（之后target_sequence_length和source_sequence_length会作为feed_dict的参数）
         target_sequence_length = tf.placeholder(tf.int32, (None,), name='target_sequence_length')
+        target_limit_index_sequence_length = tf.placeholder(tf.int32, (None,), name='target_limit_index_sequence_length')
         max_target_sequence_length = tf.reduce_max(target_sequence_length, name='max_target_len')
         source_sequence_length = tf.placeholder(tf.int32, (None,), name='source_sequence_length')
         
-        return sources, targets,targets_limit_index,learn_rate, target_sequence_length, max_target_sequence_length, source_sequence_length
+        return  targets,targets_limit_index,sources,target_sequence_length,target_limit_index_sequence_length,\
+             max_target_sequence_length, source_sequence_length,learn_rate 
 
     # convert int input to embed input
     def source_int_input_to_embed_input(self,int_input,word_to_vector):

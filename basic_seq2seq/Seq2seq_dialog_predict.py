@@ -19,6 +19,7 @@
 from distutils.version import LooseVersion
 import tensorflow as tf
 from tensorflow.python.layers.core import Dense
+import json
 
 # Check TensorFlow Version
 assert LooseVersion(tf.__version__) >= LooseVersion('1.8'), 'Please use TensorFlow version 1.8 or newer'
@@ -30,35 +31,23 @@ import tensorflow as tf
 import jieba
 
 class DialogPredict:
-    def __init__(self,checkpoint = "./dialog_model.ckpt",target_int_to_word,\
-        word_to_int,int_to_word,\
+    def __init__(self,checkpoint,target_int_to_word_file,target_word_to_int_file,\
         word_to_vector):
         self.checkpoint=checkpoint
-        self.target_int_to_word=target_int_to_word
-        self.word_to_int=word_to_int
-        self.general_word_to_int=general_word_to_int
-        self.int_to_word=int_to_word
-        self.general_int_to_word=general_int_to_word
+        with open(target_int_to_word_file,'r') as f:
+            self.target_int_to_word=json.load(f)
+        with open(target_word_to_int_file,'r') as f:
+            self.target_word_to_int=json.load(f)
         self.word_to_vector=word_to_vector
 
-    def source_sentence_to_int(self,sentence,):
-        word_list=self.word_seg_sentence(sentence)
-        result=[]
-        for word in word_list:
-            if word in word_to_int:
-                result.append(self.word_to_int.get(word)
-            elif word in general_word_to_int:
-                result.append(self.general_word_to_int.get(word)
-            else:
-                result.append(self.word_to_int.get('<UNK>')
+    def source_sentence_to_int(self,sentence,word_to_vector):
+        return [word_to_vector.get_int_by_word(word) for word in self.word_seg_sentence(sentence)]
 
-    def word_seg_sentences(self,data):
-        result=[]
-        for sentence in data:
-            result.append(word_seg_sentence(sentence))
+    def word_seg_sentence(self,sentence):
+        return list(jieba.cut(sentence.strip(),cut_all=False))
 
     # convert int input to embed input
-    def source_int_input_to_embed_input(self,int_input,int_to_word,general_int_to_word):
+    def source_int_input_to_embed_input(self,int_input,word_to_vector):
         '''
         参数说明：
         - int_input: one sentence,a list of 输入单词id的列表,format like:
@@ -70,53 +59,52 @@ class DialogPredict:
         '''
         embed_input=[]
         for item in int_input:
-            word='<UNK>'
-            if item in int_to_word:
-                word=int_to_word.get(item)
-            elif item in general_int_to_word:
-                word=general_int_to_word.get(item)
-            else:
-                word='<UNK>'
-            embed_input.append(self.word_to_vector(word))
+            embed_input.append(word_to_vector.get_vec_by_key(word_to_vector.get_word_by_int(item)))
         return embed_input
+    
+   # def source_int_inputs_to_embed_inputs(self,int_inputs,word_to_vector):
+   #     '''
+   #     参数说明：
+   #     - int_inputs: sentences.list of list of 输入单词id的列表,format like:
+   #         [[1,15,3,4],[2,6,7,8]]
+   #     - int_to_word: 字典映射of id:word
+   #     返回值: 
+   #     - embed_inputs:sentences,list of list of vector,formate like:
+   #         [[[1.0,2.1,3.5],[2.2,5.9,1.3],[2.2,3.2,2.1],[1.5,6.3.8.0]],[[1.0,2.1,3.5],[2.2,5.9,1.3],[2.2,3.2,2.1],[1.5,6.3.8.0]]]
+   #     '''
+   #     embed_inputs=[]
+   #     for item in int_inputs:
+   #         embed_inputs.append(self.source_int_input_to_embed_input(item,word_to_vector))
+   #     return embed_inputs
 
-    def source_int_inputs_to_embed_inputs(self,int_inputs):
-        '''
-        参数说明：
-        - int_inputs: sentences.list of list of 输入单词id的列表,format like:
-            [[1,15,3,4],[2,6,7,8]]
-        - int_to_word: 字典映射of id:word
-        返回值: 
-        - embed_inputs:sentences,list of list of vector,formate like:
-            [[[1.0,2.1,3.5],[2.2,5.9,1.3],[2.2,3.2,2.1],[1.5,6.3.8.0]],[[1.0,2.1,3.5],[2.2,5.9,1.3],[2.2,3.2,2.1],[1.5,6.3.8.0]]]
-        '''
-        embed_inputs=[]
-        for item in int_inputs:
-            embed_inputs.append(self.source_int_input_to_embed_input(item,int_to_word,general_int_to_word))
-        return embed_inputs
-
-    def predict(self,checkpoint,ask):
-        ask_int = sentence_to_int(ask)
+    def predict(self,ask):
+        ask_int = self.source_sentence_to_int(ask,self.word_to_vector)
         loaded_graph = tf.Graph()
         with tf.Session(graph=loaded_graph) as sess:
             # 加载模型
-            loader = tf.train.import_meta_graph(checkpoint + '.meta')
-            loader.restore(sess, checkpoint)
+            loader = tf.train.import_meta_graph(self.checkpoint + '.meta')
+            loader.restore(sess, self.checkpoint)
         
-            input_data = loaded_graph.get_tensor_by_name('inputs:0')
+            input_data = loaded_graph.get_tensor_by_name('sources:0')
             logits = loaded_graph.get_tensor_by_name('predictions:0')
             source_sequence_length = loaded_graph.get_tensor_by_name('source_sequence_length:0')
             target_sequence_length = loaded_graph.get_tensor_by_name('target_sequence_length:0')
-            
+
+            batch_size=1
             answer_logits = sess.run(logits, {input_data: [ask_int]*batch_size, 
-                                              target_sequence_length: [target_sequence_length]*batch_size, 
-                                              source_sequence_length: [len(ask)]*batch_size})[0] 
+                                              target_sequence_length: [50]*batch_size, 
+                                              source_sequence_length: [len(ask_int)]*batch_size})[0] 
         
         
-        pad = source_word_to_int["<PAD>"] 
+        pad = self.target_word_to_int["<PAD>"] 
+        print(pad)
+        print(self.target_int_to_word) 
         
         print('原始输入:', ask)
-        
+        print(answer_logits)
         print('\nTarget')
-        print('  Response Words: {}'.format(" ".join([target_int_to_word[i] for i in answer_logits if i != pad])))
+       # for item in answer_logits:
+       #     print(item,type(item))
+       #     print(self.target_int_to_word[str(item)])
+        print('  Response Words: {}'.format(" ".join([self.target_int_to_word[str(i)] for i in answer_logits if i != pad])))
 
