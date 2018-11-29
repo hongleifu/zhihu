@@ -135,7 +135,7 @@ class DialogTrain:
         (valid_targets_batch,valid_targets_limit_index_batch, valid_sources_batch, valid_targets_lengths,valid_targets_limit_index_lengths, valid_sources_lengths) = \
             next(self.get_batches(valid_target,valid_target_limit_index, valid_source, self.batch_size,source_pad_int,target_eos_int,target_eos_limit_index_int))
         
-        display_step = 50 # 每隔50轮输出loss
+        display_step = 15 # 每隔50轮输出loss
     
         #train_graph,train_op,cost=self.create_graph(self.target_int_to_word,self.target_word_to_int,train_source)
         # 构造graph
@@ -155,6 +155,8 @@ class DialogTrain:
                       self.special_embeddings,self.general_embeddings)
             
             training_logits = tf.identity(training_decoder_output.rnn_output, 'logits')
+            training_ints = tf.identity(training_decoder_output.sample_id, 'logits_ints')
+            predicting_result = tf.identity(predicting_decoder_output.rnn_output, name='predict')
             predicting_logits = tf.identity(predicting_decoder_output.sample_id, name='predictions')
             
             masks = tf.sequence_mask(target_sequence_length, max_target_sequence_length, dtype=tf.float32, name='masks')
@@ -163,7 +165,8 @@ class DialogTrain:
             with tf.name_scope("optimization"):
                 # Loss function
                 cost = tf.contrib.seq2seq.sequence_loss(
-                    training_logits,
+                    #training_logits,
+                    predicting_result,
                     targets_limit_index,
                     masks)
                 # Optimizer
@@ -217,12 +220,26 @@ class DialogTrain:
                                       len(train_source) // self.batch_size, 
                                       loss, 
                                       validation_loss[0]))
-                        answer_logit=sess.run(predicting_logits,{sources: sources_batch,
+                        answer_logit,train_ints=sess.run([predicting_logits,training_ints],
+                         {sources: sources_batch,
+                         targets: targets_batch,
                          target_sequence_length: targets_lengths,
-                         source_sequence_length: sources_lengths
-                         })[0]
+                         source_sequence_length: sources_lengths,
+                         targets_limit_index:targets_limit_index_batch,
+                         learn_rate: self.learn_rate,
+                         targets_limit_index_sequence_length:targets_limit_index_lengths
+                         })
+                        print('ask num:',len(sources_batch))
                         print('ask',[self.word_to_vector.get_word_by_int(item) for item in sources_batch[0]])
-                        print('result: {}'.format(" ".join([self.target_int_to_word[i] for i in answer_logit])))
+                        print('answer',[self.word_to_vector.get_word_by_int(item) for item in targets_batch[0]])
+                        print('target',[self.target_int_to_word[item] for item in targets_limit_index_batch[0]])
+                        print('answer int',targets_batch[0])
+                        print('target int',targets_limit_index_batch[0])
+                        print('trainn int',train_ints[0])
+                        #print('train logit',train_logit[0])
+                        print('predic int',answer_logit[0])
+                        #print('should predict: {}'.format(" ".join([self.target_int_to_word[i] for i in answer_logit[0]])))
+                        print('predict: {}'.format(" ".join([self.target_int_to_word[i] for i in answer_logit[0]])))
             
             # 保存模型
             saver = tf.train.Saver()
@@ -240,7 +257,7 @@ class DialogTrain:
                 json.dump(self.target_word_to_int,f2)
             
             #test predict begin...
-            ask='没问题'
+            ask='最近比较困难'
             ask_int=self.sentence_to_int(ask,self.word_to_vector)
             input_data = train_graph.get_tensor_by_name('sources:0')
             logits_answer = train_graph.get_tensor_by_name('predictions:0')
