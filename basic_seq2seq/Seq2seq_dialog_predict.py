@@ -32,16 +32,24 @@ import jieba
 
 class DialogPredict:
     def __init__(self,checkpoint,target_int_to_word_file,target_word_to_int_file,\
-        word_to_vector):
+        word_to_vector,batch_size):
         self.checkpoint=checkpoint
         with open(target_int_to_word_file,'r') as f:
             self.target_int_to_word=json.load(f)
         with open(target_word_to_int_file,'r') as f:
             self.target_word_to_int=json.load(f)
         self.word_to_vector=word_to_vector
+        self.batch_size=batch_size
+
+       # self.loaded_graph = tf.Graph()
+       # with tf.Session(graph=self.loaded_graph) as sess:
+       #     # 加载模型
+       #     loader = tf.train.import_meta_graph(self.checkpoint + '.meta')
+       #     loader.restore(sess, self.checkpoint)
 
     def source_sentence_to_int(self,sentence,word_to_vector):
-        return [word_to_vector.get_int_by_word(word) for word in self.word_seg_sentence(sentence)]
+        return [word_to_vector.get_int_by_word(word) for word in self.word_seg_sentence(sentence)]+[word_to_vector.get_int_by_word('<EOS>')]
+        #return [word_to_vector.get_int_by_word(word) for word in self.word_seg_sentence(sentence)]
 
     def word_seg_sentence(self,sentence):
         return list(jieba.cut(sentence.strip(),cut_all=False))
@@ -79,7 +87,9 @@ class DialogPredict:
 
     def predict(self,ask):
         ask_int = self.source_sentence_to_int(ask,self.word_to_vector)
+        ask_vector = self.source_int_input_to_embed_input(ask_int,self.word_to_vector)
         loaded_graph = tf.Graph()
+        #with tf.Session(graph=self.loaded_graph) as sess:
         with tf.Session(graph=loaded_graph) as sess:
             # 加载模型
             loader = tf.train.import_meta_graph(self.checkpoint + '.meta')
@@ -90,21 +100,22 @@ class DialogPredict:
             source_sequence_length = loaded_graph.get_tensor_by_name('source_sequence_length:0')
             target_sequence_length = loaded_graph.get_tensor_by_name('target_sequence_length:0')
 
-            batch_size=1
-            answer_logits = sess.run(logits, {input_data: [ask_int]*batch_size, 
-                                              target_sequence_length: [50]*batch_size, 
-                                              source_sequence_length: [len(ask_int)]*batch_size})[0] 
+            answer_logits = sess.run(logits, {input_data: [ask_int]*self.batch_size, 
+                                              target_sequence_length: [50]*self.batch_size, 
+                                              source_sequence_length: [len(ask_int)]*self.batch_size})[0] 
         
         
-        pad = self.target_word_to_int["<PAD>"] 
-        print(pad)
+        eos = self.target_word_to_int["<EOS>"] 
         print(self.target_int_to_word) 
         
-        print('原始输入:', ask)
+        print('\n原始输入:', ask)
+        print('原始输入int:', ask_int)
+        print('原始输入分词:', self.word_seg_sentence(ask))
+        
         print(answer_logits)
-        print('\nTarget')
+        print('Target:')
        # for item in answer_logits:
        #     print(item,type(item))
        #     print(self.target_int_to_word[str(item)])
-        print('  Response Words: {}'.format(" ".join([self.target_int_to_word[str(i)] for i in answer_logits if i != pad])))
+        print('  Response Words: {}'.format(" ".join([self.target_int_to_word[str(i)] for i in answer_logits])))
 
