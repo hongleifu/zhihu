@@ -120,6 +120,7 @@ class DialogTrain:
         target_eos_limit_index_int=self.target_word_to_int['<EOS>']
         
         source_int = self.sentences_to_int(source_data,self.word_to_vector) 
+        print('source_int--------',source_int)
         target_int = self.sentences_to_int(target_data,self.word_to_vector) 
         target_limit_index_int = self.target_limit_index_sentences_to_int(target_data,self.target_word_to_int) 
 
@@ -443,7 +444,9 @@ class DialogTrain:
        # print('type special embedding[0]')
        # print(type(self.special_embeddings[0]))
         #encoder_embeddings = tf.Variable(self.special_embeddings)
+        print('begin create encoder embedding-------------')
         encoder_embeddings = tf.constant(self.general_embeddings)
+        print('end create encoder embedding-------------')
         encoder_embed_input = tf.nn.embedding_lookup(encoder_embeddings,encoder_input)
         print(encoder_input)
         print(type(encoder_embed_input))
@@ -643,7 +646,7 @@ class DialogTrain:
             if item==None:
                 print(item)
                 item=1000
-            embed_input.append(word_to_vector.get_vec_by_key(word_to_vector.get_word_by_int(item)))
+            embed_input.append(word_to_vector.get_vec_by_word(word_to_vector.get_word_by_int(item)))
         return embed_input
     
     def source_int_inputs_to_embed_inputs(self,int_inputs,word_to_vector):

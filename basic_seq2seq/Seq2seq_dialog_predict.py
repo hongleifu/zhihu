@@ -67,7 +67,7 @@ class DialogPredict:
         '''
         embed_input=[]
         for item in int_input:
-            embed_input.append(word_to_vector.get_vec_by_key(word_to_vector.get_word_by_int(item)))
+            embed_input.append(word_to_vector.get_vec_by_word(word_to_vector.get_word_by_int(item)))
         return embed_input
     
    # def source_int_inputs_to_embed_inputs(self,int_inputs,word_to_vector):
