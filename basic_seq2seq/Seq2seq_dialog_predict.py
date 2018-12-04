@@ -41,11 +41,14 @@ class DialogPredict:
         self.word_to_vector=word_to_vector
         self.batch_size=batch_size
 
-       # self.loaded_graph = tf.Graph()
-       # with tf.Session(graph=self.loaded_graph) as sess:
-       #     # 加载模型
-       #     loader = tf.train.import_meta_graph(self.checkpoint + '.meta')
-       #     loader.restore(sess, self.checkpoint)
+        self.graph = tf.Graph()
+        with self.graph.as_default():
+            self.sess=tf.Session(graph=self.graph)
+        with self.sess.as_default():
+            with self.graph.as_default():
+                # 加载模型
+                loader = tf.train.import_meta_graph(self.checkpoint + '.meta')
+                loader.restore(self.sess, self.checkpoint)
 
     def source_sentence_to_int(self,sentence,word_to_vector):
         return [word_to_vector.get_int_by_word(word) for word in self.word_seg_sentence(sentence)]+[word_to_vector.get_int_by_word('<EOS>')]
@@ -88,21 +91,29 @@ class DialogPredict:
     def predict(self,ask):
         ask_int = self.source_sentence_to_int(ask,self.word_to_vector)
         ask_vector = self.source_int_input_to_embed_input(ask_int,self.word_to_vector)
-        loaded_graph = tf.Graph()
+       # loaded_graph = tf.Graph()
         #with tf.Session(graph=self.loaded_graph) as sess:
-        with tf.Session(graph=loaded_graph) as sess:
+        #with tf.Session(graph=loaded_graph) as sess:
             # 加载模型
-            loader = tf.train.import_meta_graph(self.checkpoint + '.meta')
-            loader.restore(sess, self.checkpoint)
+            #loader = tf.train.import_meta_graph(self.checkpoint + '.meta')
+            #loader.restore(sess, self.checkpoint)
         
-            input_data = loaded_graph.get_tensor_by_name('sources:0')
-            logits = loaded_graph.get_tensor_by_name('predictions:0')
-            source_sequence_length = loaded_graph.get_tensor_by_name('source_sequence_length:0')
-            target_sequence_length = loaded_graph.get_tensor_by_name('target_sequence_length:0')
+           # input_data = loaded_graph.get_tensor_by_name('sources:0')
+           # logits = loaded_graph.get_tensor_by_name('predictions:0')
+           # source_sequence_length = loaded_graph.get_tensor_by_name('source_sequence_length:0')
+           # target_sequence_length = loaded_graph.get_tensor_by_name('target_sequence_length:0')
 
-            answer_logits = sess.run(logits, {input_data: [ask_int]*self.batch_size, 
-                                              target_sequence_length: [50]*self.batch_size, 
-                                              source_sequence_length: [len(ask_int)]*self.batch_size})[0] 
+           # answer_logits = sess.run(logits, {input_data: [ask_int]*self.batch_size, 
+           #                                   target_sequence_length: [50]*self.batch_size, 
+           #                                   source_sequence_length: [len(ask_int)]*self.batch_size})[0] 
+        input_data = self.graph.get_tensor_by_name('sources:0')
+        logits = self.graph.get_tensor_by_name('predictions:0')
+        source_sequence_length = self.graph.get_tensor_by_name('source_sequence_length:0')
+        target_sequence_length = self.graph.get_tensor_by_name('target_sequence_length:0')
+
+        answer_logits = self.sess.run(logits, {input_data: [ask_int]*self.batch_size, 
+                                          target_sequence_length: [50]*self.batch_size, 
+                                          source_sequence_length: [len(ask_int)]*self.batch_size})[0] 
         
         
         eos = self.target_word_to_int["<EOS>"] 

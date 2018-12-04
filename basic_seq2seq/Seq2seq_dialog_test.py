@@ -9,7 +9,7 @@ vec_model_file='./word2vect/finance/finance_vect_2.txt'
 extend_vec_model_file='./word2vect/extend_vect_file.txt'
 word_to_vector = word2vec_tool.MyWord2vec(vec_model_file,extend_vec_model_file)
 word_to_vector.load()
-batch_size=1
+batch_size=128
 print('load word2vec model succ!')
 #print(word_to_vector.max_word_len)
 #print(len(word_to_vector.word_vect_dict))
@@ -30,15 +30,15 @@ def Seq2seq_dialog_train_test():
     #get Seq2seq_dialog_train model
     print('load Seq2seq model.....')
     checkpoint='./dialog_model.ckpt'
-    #source_file='./data/ask_ori'
-    #target_file='./data/answer_ori'
-    source_file='./data/ask'
-    target_file='./data/answer'
+    source_file='./data/ask_ori'
+    target_file='./data/answer_ori'
+    #source_file='./data/ask'
+    #target_file='./data/answer'
     encoder_rnn_size=100
     encoder_num_layers=2
     decoder_rnn_size=100
     decoder_num_layers=2
-    epochs=100
+    epochs=50
     learn_rate=0.001
     word_to_vector_model=word_to_vector
     #special_embeddings=word_to_vector_model.random_vect()
@@ -62,10 +62,17 @@ def Seq2seq_dialog_train_predict_test():
     predict_model=Seq2seq_dialog_predict.DialogPredict(checkpoint,\
         target_int_to_word_file,target_word_to_int_file,word_to_vector,batch_size)
     predict_model.predict('对')
-    predict_model.predict('没问题')
-    predict_model.predict('我一会就去存')
-    predict_model.predict('没钱')
-    predict_model.predict('不明白')
+    predict_model.predict('哎你好')
+    predict_model.predict('嗯嗯好')
+    predict_model.predict('什么事您是哪位')
+    predict_model.predict('您是宜信吗')
+    predict_model.predict('刚才没听到您哪位')
+    predict_model.predict('对啊是我')
+    predict_model.predict('您打错了')
+    predict_model.predict('不是我不是')
+    predict_model.predict('嗯我是他的朋友')
+    predict_model.predict('刚才说什么')
+    predict_model.predict('刚才没听清楚')
 #def Seq2seq_dialog_predict_test():
 #    #load word2vec model
 #    vec_model_file='./word2vect/finance/finance_vect_2.txt'
@@ -81,5 +88,5 @@ def Seq2seq_dialog_train_predict_test():
 #    predict_model.predict('是的')
 
 if __name__=='__main__':
-    Seq2seq_dialog_train_test()
+    #Seq2seq_dialog_train_test()
     Seq2seq_dialog_train_predict_test()
