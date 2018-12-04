@@ -33,6 +33,7 @@ import jieba
 class DialogPredict:
     def __init__(self,checkpoint,target_int_to_word_file,target_word_to_int_file,\
         word_to_vector,batch_size):
+        #初始化参数
         self.checkpoint=checkpoint
         with open(target_int_to_word_file,'r') as f:
             self.target_int_to_word=json.load(f)
@@ -41,12 +42,12 @@ class DialogPredict:
         self.word_to_vector=word_to_vector
         self.batch_size=batch_size
 
+        # 加载模型
         self.graph = tf.Graph()
         with self.graph.as_default():
             self.sess=tf.Session(graph=self.graph)
         with self.sess.as_default():
             with self.graph.as_default():
-                # 加载模型
                 loader = tf.train.import_meta_graph(self.checkpoint + '.meta')
                 loader.restore(self.sess, self.checkpoint)
 
@@ -73,39 +74,10 @@ class DialogPredict:
             embed_input.append(word_to_vector.get_vec_by_word(word_to_vector.get_word_by_int(item)))
         return embed_input
     
-   # def source_int_inputs_to_embed_inputs(self,int_inputs,word_to_vector):
-   #     '''
-   #     参数说明：
-   #     - int_inputs: sentences.list of list of 输入单词id的列表,format like:
-   #         [[1,15,3,4],[2,6,7,8]]
-   #     - int_to_word: 字典映射of id:word
-   #     返回值: 
-   #     - embed_inputs:sentences,list of list of vector,formate like:
-   #         [[[1.0,2.1,3.5],[2.2,5.9,1.3],[2.2,3.2,2.1],[1.5,6.3.8.0]],[[1.0,2.1,3.5],[2.2,5.9,1.3],[2.2,3.2,2.1],[1.5,6.3.8.0]]]
-   #     '''
-   #     embed_inputs=[]
-   #     for item in int_inputs:
-   #         embed_inputs.append(self.source_int_input_to_embed_input(item,word_to_vector))
-   #     return embed_inputs
-
     def predict(self,ask):
         ask_int = self.source_sentence_to_int(ask,self.word_to_vector)
         ask_vector = self.source_int_input_to_embed_input(ask_int,self.word_to_vector)
-       # loaded_graph = tf.Graph()
-        #with tf.Session(graph=self.loaded_graph) as sess:
-        #with tf.Session(graph=loaded_graph) as sess:
-            # 加载模型
-            #loader = tf.train.import_meta_graph(self.checkpoint + '.meta')
-            #loader.restore(sess, self.checkpoint)
-        
-           # input_data = loaded_graph.get_tensor_by_name('sources:0')
-           # logits = loaded_graph.get_tensor_by_name('predictions:0')
-           # source_sequence_length = loaded_graph.get_tensor_by_name('source_sequence_length:0')
-           # target_sequence_length = loaded_graph.get_tensor_by_name('target_sequence_length:0')
 
-           # answer_logits = sess.run(logits, {input_data: [ask_int]*self.batch_size, 
-           #                                   target_sequence_length: [50]*self.batch_size, 
-           #                                   source_sequence_length: [len(ask_int)]*self.batch_size})[0] 
         input_data = self.graph.get_tensor_by_name('sources:0')
         logits = self.graph.get_tensor_by_name('predictions:0')
         source_sequence_length = self.graph.get_tensor_by_name('source_sequence_length:0')
@@ -117,7 +89,7 @@ class DialogPredict:
         
         
         eos = self.target_word_to_int["<EOS>"] 
-        print(self.target_int_to_word) 
+        #print(self.target_int_to_word) 
         
         print('\n原始输入:', ask)
         print('原始输入int:', ask_int)
@@ -125,8 +97,5 @@ class DialogPredict:
         
         print(answer_logits)
         print('Target:')
-       # for item in answer_logits:
-       #     print(item,type(item))
-       #     print(self.target_int_to_word[str(item)])
         print('  Response Words: {}'.format(" ".join([self.target_int_to_word[str(i)] for i in answer_logits])))
 
