@@ -221,26 +221,25 @@ class DialogTrain:
                                       len(train_source) // self.batch_size, 
                                       loss, 
                                       validation_loss[0]))
-                        answer_logit,train_ints=sess.run([predicting_logits,training_ints],
-                         {sources: sources_batch,
-                         targets: targets_batch,
-                         target_sequence_length: targets_lengths,
-                         source_sequence_length: sources_lengths,
-                         targets_limit_index:targets_limit_index_batch,
-                         learn_rate: self.learn_rate,
-                         targets_limit_index_sequence_length:targets_limit_index_lengths
-                         })
-                        print('ask num:',len(sources_batch))
-                        print('ask',[self.word_to_vector.get_word_by_int(item) for item in sources_batch[0]])
-                        print('answer',[self.word_to_vector.get_word_by_int(item) for item in targets_batch[0]])
-                        print('target',[self.target_int_to_word[item] for item in targets_limit_index_batch[0]])
-                        print('answer int',targets_batch[0])
-                        print('target int',targets_limit_index_batch[0])
-                        print('trainn int',train_ints[0])
-                        #print('train logit',train_logit[0])
-                        print('predic int',answer_logit[0])
-                        #print('should predict: {}'.format(" ".join([self.target_int_to_word[i] for i in answer_logit[0]])))
-                        print('predict: {}'.format(" ".join([self.target_int_to_word[i] for i in answer_logit[0]])))
+                       # answer_logit,train_ints=sess.run([predicting_logits,training_ints],
+                       #  {sources: sources_batch,
+                       #  targets: targets_batch,
+                       #  target_sequence_length: targets_lengths,
+                       #  source_sequence_length: sources_lengths,
+                       #  targets_limit_index:targets_limit_index_batch,
+                       #  learn_rate: self.learn_rate,
+                       #  targets_limit_index_sequence_length:targets_limit_index_lengths
+                       #  })
+                       # print('ask num:',len(sources_batch))
+                       # print('ask',[self.word_to_vector.get_word_by_int(item) for item in sources_batch[0]])
+                       # print('answer',[self.word_to_vector.get_word_by_int(item) for item in targets_batch[0]])
+                       # print('target',[self.target_int_to_word[item] for item in targets_limit_index_batch[0]])
+                       # print('answer int',targets_batch[0])
+                       # print('target int',targets_limit_index_batch[0])
+                       # print('trainn int',train_ints[0])
+                       # print('predic int',answer_logit[0])
+                       # #print('should predict: {}'.format(" ".join([self.target_int_to_word[i] for i in answer_logit[0]])))
+                       # print('predict: {}'.format(" ".join([self.target_int_to_word[i] for i in answer_logit[0]])))
             
             # 保存模型
             saver = tf.train.Saver()
